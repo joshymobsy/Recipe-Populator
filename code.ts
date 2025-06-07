@@ -224,7 +224,7 @@ async function populateFrame(frame: FrameNode, recipe: Recipe) {
       if (value) {
         for (const layer of layers) {
           await updateLayer(layer, value, field.isImage);
-        }
+    }
       }
     }
   }
