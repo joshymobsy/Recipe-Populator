@@ -166,7 +166,8 @@ async function updateLayer(layer: SceneNode, value: string, isImage: boolean) {
         layer.fills = [{
           type: 'IMAGE',
           scaleMode: 'FILL',
-          imageHash: image.hash
+          imageHash: image.hash,
+          imageTransform: [[1, 0, 0], [0, 1, 0]]
         }];
         log(`[Image] Successfully set image fill for layer: "${layer.name}" with hash: ${image.hash}`);
       }
