@@ -38,7 +38,9 @@ class MobScraper:
                 browser = p.chromium.launch(headless=True)
                 page = browser.new_page()
                 page.set_extra_http_headers(self.headers)
-                page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                page.goto(url, wait_until="domcontentloaded", timeout=90000)
+                # Explicitly wait for an image element within a recipe card to ensure content is loaded
+                page.wait_for_selector('div[class*="overflow-hidden"][class*="rounded-2xl"] img[src^="http"], div[class*="overflow-hidden"][class*="rounded-2xl"] img[data-src^="http"]', timeout=60000)
                 content = page.content()
                 browser.close()
                 return content
@@ -93,7 +95,7 @@ class MobScraper:
         # Pattern matches e.g. /_1200x630_crop_center-center_82_none/ or /recipes/2024/12/_1200x630_crop_center-center_82_none/
         return re.sub(r'/(_[0-9]+x[0-9]+_crop_[^/]+/)', '/', url)
 
-    def extract_recipe_data(self, card, collection_json_ld):
+    def extract_recipe_data(self, card, collection_json_ld, default_dietary_category=None):
         """Extract data from a recipe card and fetch details from its individual page"""
         recipe_data = {}
         try:
@@ -145,6 +147,10 @@ class MobScraper:
                                 recipe_img = ld['image']['url']
                             elif isinstance(ld['image'], str):
                                 recipe_img = ld['image']
+                            else:
+                                logging.debug(f"No 'image' found in Recipe JSON-LD (neither dict with url nor string) for {recipe_url}")
+                        else:
+                            logging.debug(f"No 'image' key found in Recipe JSON-LD for {recipe_url}")
 
                         # Get description
                         description = ld.get('description', '')
@@ -153,6 +159,8 @@ class MobScraper:
                         # Try extracting description from articleBody if available
                         if not description and 'articleBody' in ld:
                             description = ld['articleBody']
+                        if not description:
+                            logging.debug(f"No description found in JSON-LD (description, about, articleBody) for {recipe_url}")
 
                         # Get dietary requirements
                         if 'recipeCategory' in ld:
@@ -184,37 +192,56 @@ class MobScraper:
                                     dietary_requirements.append(nutrition_data['suitableForDiet'])
 
                     # Chef data
-                    elif ld.get('@type') == 'Person' and ld.get('name') == chef_name:
-                        if 'image' in ld:
-                            if isinstance(ld['image'], dict) and 'url' in ld['image']:
-                                chef_img = ld['image']['url']
-                            elif isinstance(ld['image'], str):
-                                chef_img = ld['image']
+                    elif ld.get('@type') == 'Person':
+                        if ld.get('name') == chef_name:
+                            if 'image' in ld:
+                                if isinstance(ld['image'], dict) and 'url' in ld['image']:
+                                    chef_img = ld['image']['url']
+                                elif isinstance(ld['image'], str):
+                                    chef_img = ld['image']
+                                else:
+                                    logging.debug(f"Chef image fallback (JSON-LD) failed: no 'image' found (neither dict with url nor string) for {chef_name} for {recipe_url}")
+                            else:
+                                logging.debug(f"Chef image fallback (JSON-LD) failed: 'image' key not found for {chef_name} for {recipe_url}")
+                        else:
+                            logging.debug(f"Chef data: Person type but name mismatch for {chef_name} for {recipe_url}")
 
             # Fallback for description - try to find it in the specific div based on screenshot
             if not description:
+                logging.debug(f"Attempting description fallback for {recipe_url}")
                 description_div_outer = individual_recipe_soup.find('div', class_=re.compile(r'body-text-sm.*max-w-prose'))
                 if description_div_outer:
                     description_div_inner = description_div_outer.find('div', class_=re.compile(r'line-clamp-2|md:line-clamp-5'))
                     if description_div_inner:
                         description = description_div_inner.get_text(strip=True)
+                    else:
+                        logging.debug(f"Description fallback failed: inner div not found for {recipe_url}")
+                else:
+                    logging.debug(f"Description fallback failed: outer div not found for {recipe_url}")
 
             # Fallback for recipe image - try meta tags on individual page
             if not recipe_img:
+                logging.debug(f"Attempting recipe image fallback (meta tags) for {recipe_url}")
                 og_image = individual_recipe_soup.find('meta', property='og:image')
                 if og_image and og_image.get('content'):
                     recipe_img = og_image['content']
+                else:
+                    logging.debug(f"Recipe image fallback (meta tags) failed for {recipe_url}")
             
             # Fallback for recipe image - try from card if still not found (least preferred)
             if not recipe_img:
+                logging.debug(f"Attempting recipe image fallback (card img tag) for {recipe_url}")
                 img_tag = card.find('img')
                 if img_tag and img_tag.get('src'):
                     recipe_img = img_tag['src']
                 elif img_tag and img_tag.get('data-src'):
                     recipe_img = img_tag['data-src']
+                else:
+                    logging.debug(f"Recipe image fallback (card img tag) failed for {recipe_url}")
 
             # Fallback for chef image
             if not chef_img and chef_url_path:
+                logging.debug(f"Attempting chef image fallback for {recipe_url}")
                 chef_page_url = urljoin(self.base_url, chef_url_path)
                 logging.info(f"Visiting chef page for fallback: {chef_page_url}")
                 chef_page_html = self.make_request(chef_page_url)
@@ -228,29 +255,49 @@ class MobScraper:
                     # Fallback to JSON-LD
                     chef_json_ld = self._extract_json_ld(chef_page_soup)
                     for ld in chef_json_ld:
-                        if isinstance(ld, dict) and ld.get('@type') == 'Person' and ld.get('name') == chef_name:
-                            if 'image' in ld:
-                                if isinstance(ld['image'], dict) and 'url' in ld['image']:
-                                    chef_img = ld['image']['url']
-                                elif isinstance(ld['image'], str):
-                                    chef_img = ld['image']
+                        if isinstance(ld, dict) and ld.get('@type') == 'Person':
+                            if ld.get('name') == chef_name:
+                                if 'image' in ld:
+                                    if isinstance(ld['image'], dict) and 'url' in ld['image']:
+                                        chef_img = ld['image']['url']
+                                    elif isinstance(ld['image'], str):
+                                        chef_img = ld['image']
+                                    else:
+                                        logging.debug(f"Chef image fallback (JSON-LD) failed: no 'image' found (neither dict with url nor string) for {chef_name} for {recipe_url}")
+                                else:
+                                    logging.debug(f"Chef image fallback (JSON-LD) failed: 'image' key not found for {chef_name} for {recipe_url}")
+                            else:
+                                logging.debug(f"Chef data: Person type but name mismatch for {chef_name} for {recipe_url}")
+            else:
+                logging.debug(f"No chef image found and no chef_url_path for {recipe_url}")
 
             # Clean up dietary requirements
             dietary_requirements = list(set([r.strip() for r in dietary_requirements if r.strip()]))
             dietary_requirements.sort()
             
-            # If no dietary requirements found, set to "None"
-            dietary_output = ', '.join(dietary_requirements) if dietary_requirements else "None"
+            # If no dietary requirements found and a default category is provided, set it
+            if not dietary_requirements and default_dietary_category:
+                logging.debug(f"Applying default dietary category '{default_dietary_category}' for {recipe_url}")
+                dietary_output = default_dietary_category
+            else:
+                dietary_output = ', '.join(dietary_requirements) if dietary_requirements else "None"
+                if not dietary_requirements:
+                    logging.debug(f"No dietary requirements found for {recipe_url}, setting to 'None'")
 
             # After all image extraction logic, clean up the URLs
             recipe_img = self.strip_cropping_from_url(recipe_img)
             chef_img = self.strip_cropping_from_url(chef_img)
 
+            # If the recipe has a placeholder image and an empty description, skip it
+            if recipe_img == "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" and not description:
+                logging.warning(f"Skipping recipe '{title}' (URL: {recipe_url}) due to placeholder image and empty description.")
+                return None
+
             recipe_data = {
-                'Image': self.format_image_url(recipe_img),
+                'Image': self.format_image_url(recipe_img) if recipe_img else "",
                 'Title': title,
                 'Time': time_text,
-                'Chef Image': self.format_image_url(chef_img),
+                'Chef Image': self.format_image_url(chef_img) if chef_img else "",
                 'Chef Name': chef_name,
                 'Description': description,
                 'Dietary Requirements': dietary_output
@@ -274,11 +321,11 @@ class MobScraper:
                 return f"https://images.weserv.nl/?url={self.base_url}{url}"
         return url
 
-    def scrape_recipes(self):
+    def scrape_recipes(self, collection_url, default_dietary_category=None):
         """Main scraping function"""
         try:
             # Get the collection page content
-            html_content = self.make_request(self.collection_url)
+            html_content = self.make_request(collection_url)
             soup = BeautifulSoup(html_content, 'html.parser')
             
             # Find all recipe cards - more flexible selector
@@ -293,7 +340,7 @@ class MobScraper:
             
             recipes = []
             for card in cards:
-                recipe_data = self.extract_recipe_data(card, [])
+                recipe_data = self.extract_recipe_data(card, [], default_dietary_category)
                 if recipe_data:
                     recipes.append(recipe_data)
                     logging.info(f"Scraped: {recipe_data['Title']}")
@@ -301,10 +348,15 @@ class MobScraper:
             if not recipes:
                 raise ValueError("No recipes were successfully scraped")
             
-            # Write to CSV
-            with open('mob_recipes_local.csv', 'w', newline='', encoding='utf-8') as f:
-                writer = csv.DictWriter(f, fieldnames=['Image', 'Title', 'Time', 'Chef Name', 'Chef Image', 'Description', 'Dietary Requirements'])
-                writer.writeheader()
+            # Write to CSV in append mode
+            file_exists = os.path.exists('mob_recipes_local.csv')
+            with open('mob_recipes_local.csv', 'a', newline='', encoding='utf-8') as f:
+                writer = csv.DictWriter(f, fieldnames=['Image', 'Title', 'Time', 'Chef Name', 'Chef Image', 'Description', 'Dietary Requirements'], quoting=csv.QUOTE_ALL)
+                
+                # Only write header if file is new
+                if not file_exists:
+                    writer.writeheader()
+
                 for recipe in recipes:
                     writer.writerow(recipe)
             
@@ -317,7 +369,10 @@ class MobScraper:
 
 def main():
     scraper = MobScraper()
-    success = scraper.scrape_recipes()
+    
+    # Scrape from the vegetarian dinners collection page
+    vegetarian_collection_url = "https://www.mob.co.uk/recipes/collections/vegetarian-dinners"
+    success = scraper.scrape_recipes(vegetarian_collection_url, default_dietary_category="Vegetarian")
     
     if success:
         logging.info("Scraping completed successfully")
