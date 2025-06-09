@@ -132,6 +132,12 @@ function base64ToArrayBuffer(base64: string): ArrayBuffer {
   return bytes.buffer;
 }
 
+// New function to pick random recipes
+function pickRandomRecipes(recipes: Recipe[], count: number): Recipe[] {
+  const shuffled = [...recipes].sort(() => 0.5 - Math.random());
+  return shuffled.slice(0, count);
+}
+
 async function updateLayer(layer: SceneNode, value: string, isImage: boolean) {
   if (isImage) {
     log(`[Image] Attempting to update layer: "${layer.name}" with value (URL or Base64): "${value.substring(0, 50)}..."`);
@@ -240,12 +246,21 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
       const recipes = parseCSV(msg.csvData);
       log(`Successfully parsed ${recipes.length} recipes from CSV data.`);
       
-      log(`Searching for recipes matching query "${msg.query}"...`);
-      const matches = findMatchingRecipes(recipes, msg.query);
-      
-      if (matches.length === 0) {
-        showError('No matching recipe found. Please refine your search.');
-        log(`----- Plugin Execution End (No Matches) -----`);
+      let recipesToPopulate: Recipe[] = [];
+
+      if (msg.query) {
+        log(`Searching for recipes matching query "${msg.query}"...`);
+        recipesToPopulate = findMatchingRecipes(recipes, msg.query);
+      } else {
+        const selectionCount = figma.currentPage.selection.filter(node => node.type === 'FRAME').length;
+        const numRecipesToPick = Math.max(1, selectionCount > 0 ? selectionCount : 5); // Pick at least 1, or 5 if no frames selected
+        log(`No search query provided. Picking ${numRecipesToPick} random recipes.`);
+        recipesToPopulate = pickRandomRecipes(recipes, numRecipesToPick);
+      }
+
+      if (recipesToPopulate.length === 0) {
+        showError('No matching recipes found, or no recipes available to pick randomly. Please refine your search or upload a valid CSV.');
+        log(`----- Plugin Execution End (No Matches/Random Pick) -----`);
         return;
       }
       
@@ -256,13 +271,13 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
         return;
       }
       
-      log(`Found ${matches.length} matching recipes for query "${msg.query}".`);
+      log(`Found ${recipesToPopulate.length} recipes to populate (matches or random picks).`);
       log(`User has ${selection.length} Figma frames selected for population.`);
       
       for (let i = 0; i < selection.length; i++) {
         const node = selection[i];
         if (node.type === 'FRAME') {
-          const recipe = matches[i % matches.length];
+          const recipe = recipesToPopulate[i % recipesToPopulate.length];
           log(`Populating selected frame ${i + 1}/${selection.length}: "${node.name}" with recipe title: "${recipe.Title || '(No Title)'}"`);
           await populateFrame(node, recipe);
         } else {
@@ -270,6 +285,8 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
         }
       }
       
+      const populatedCount = selection.filter(node => node.type === 'FRAME').length;
+      log(`Successfully populated ${populatedCount} recipe cards!`);
       log('Recipe population process complete!');
       log(`----- Plugin Execution End (Success) -----`);
     } catch (error: unknown) {
