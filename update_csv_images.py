@@ -16,14 +16,15 @@ def format_image_url_for_csv(url):
         parsed_url = urlparse(url)
         query_params = parse_qs(parsed_url.query)
 
-        # Add or override w, h, fit, q with WebP optimization
+        # Add or override w, h, fit, q with JPEG optimization
         query_params['w'] = ['640']
         query_params['h'] = ['640']
         query_params['fit'] = ['cover']
         query_params['q'] = ['75']
-        query_params['output'] = ['webp']  # Use WebP format for better compression
+        query_params['output'] = ['jpg']  # Use JPEG format which is well-supported
         query_params['af'] = ['']    # Enable auto-format
         query_params['il'] = ['']    # Enable interlacing
+        query_params['sharp'] = ['1']  # Slight sharpening to maintain quality at lower size
 
         # Reconstruct the query string
         new_query = urlencode(query_params, doseq=True)
