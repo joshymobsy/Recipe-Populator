@@ -4,7 +4,7 @@ import csv
 import re
 import time
 import json
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse, parse_qs, urlencode
 import logging
 from datetime import datetime
 import os
@@ -312,14 +312,32 @@ class MobScraper:
         """Format image URL for use with images.weserv.nl"""
         if not url:
             return ''
+        # Base parameters for resizing and quality
+        params = "w=640&h=640&fit=cover&q=75"
+
         if not url.startswith('https://images.weserv.nl'):
             if 'mob-cdn.co.uk' in url:
-                return f"https://images.weserv.nl/?url={url}"
+                return f"https://images.weserv.nl/?url={url}&{params}"
             elif url.startswith('//'):
-                return f"https://images.weserv.nl/?url=https:{url}"
+                return f"https://images.weserv.nl/?url=https:{url}&{params}"
             elif url.startswith('/'):
-                return f"https://images.weserv.nl/?url={self.base_url}{url}"
-        return url
+                return f"https://images.weserv.nl/?url={self.base_url}{url}&{params}"
+        # If it's already an images.weserv.nl URL, ensure it has the desired parameters
+        # This part ensures that if the URL already has some parameters, we append/override correctly.
+        parsed_url = urlparse(url)
+        query_params = parse_qs(parsed_url.query)
+
+        # Add or override w, h, fit, q
+        query_params['w'] = ['640']
+        query_params['h'] = ['640']
+        query_params['fit'] = ['cover']
+        query_params['q'] = ['75']
+
+        # Reconstruct the query string
+        new_query = urlencode(query_params, doseq=True)
+        
+        # Reconstruct the URL
+        return parsed_url._replace(query=new_query).geturl()
 
     def scrape_recipes(self, collection_url, default_dietary_category=None):
         """Main scraping function"""
