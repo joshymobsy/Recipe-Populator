@@ -244,7 +244,7 @@
 
         // Handle messages from the plugin backend (code.ts)
         window.onmessage = (event) => {
-            const { type, message } = event.data.pluginMessage;
+            const { type, message, imageData, layerName } = event.data.pluginMessage;
             if (type === 'log') {
                 const p = document.createElement('p');
                 p.textContent = message;
@@ -267,6 +267,29 @@
                 p.classList.add('error');
                 logOutput.appendChild(p);
                 logOutput.scrollTop = logOutput.scrollHeight;
+            } else if (type === 'image-info' && imageData) {
+                // Decode ArrayBuffer to Blob and get dimensions
+                const uint8Array = new Uint8Array(imageData.data);
+                const blob = new Blob([uint8Array]);
+                const url = URL.createObjectURL(blob);
+                const img = new window.Image();
+                img.onload = function () {
+                    const p = document.createElement('p');
+                    p.textContent = `[Image] Layer "${layerName}": Image dimensions: ${img.width}x${img.height}px`;
+                    p.classList.add('info');
+                    logOutput.appendChild(p);
+                    logOutput.scrollTop = logOutput.scrollHeight;
+                    URL.revokeObjectURL(url);
+                };
+                img.onerror = function () {
+                    const p = document.createElement('p');
+                    p.textContent = `[Image] Layer "${layerName}": Unable to determine image dimensions.`;
+                    p.classList.add('warning');
+                    logOutput.appendChild(p);
+                    logOutput.scrollTop = logOutput.scrollHeight;
+                    URL.revokeObjectURL(url);
+                };
+                img.src = url;
             }
         };
     </script>
