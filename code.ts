@@ -211,8 +211,8 @@ function findLayersByName(node: SceneNode | ChildrenMixin, name: string): SceneN
   return foundLayers;
 }
 
-async function populateFrame(frame: FrameNode, recipe: Recipe) {
-  log(`[Frame] Populating frame: "${frame.name}" with recipe: "${recipe.Title || '(No Title)'}"`);
+async function populateFrame(frame: SceneNode, recipe: Recipe) {
+  log(`[Frame] Populating frame/instance: "${frame.name}" with recipe: "${recipe.Title || '(No Title)'}"`);
   
   const fieldsToPopulate = [
     { csvField: 'Image', layerName: 'Image', isImage: true }, 
@@ -252,8 +252,8 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
         log(`Searching for recipes matching query "${msg.query}"...`);
         recipesToPopulate = findMatchingRecipes(recipes, msg.query);
       } else {
-        const selectionCount = figma.currentPage.selection.filter(node => node.type === 'FRAME').length;
-        const numRecipesToPick = Math.max(1, selectionCount > 0 ? selectionCount : 5); // Pick at least 1, or 5 if no frames selected
+        const selectionCount = figma.currentPage.selection.filter(node => node.type === 'FRAME' || node.type === 'INSTANCE').length;
+        const numRecipesToPick = Math.max(1, selectionCount > 0 ? selectionCount : 5); // Pick at least 1, or 5 if no frames/instances selected
         log(`No search query provided. Picking ${numRecipesToPick} random recipes.`);
         recipesToPopulate = pickRandomRecipes(recipes, numRecipesToPick);
       }
@@ -266,26 +266,26 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
       
       const selection = figma.currentPage.selection;
       if (selection.length === 0) {
-        showError('Please select at least one frame to populate.');
+        showError('Please select at least one frame or instance to populate.');
         log(`----- Plugin Execution End (No Selection) -----`);
         return;
       }
       
       log(`Found ${recipesToPopulate.length} recipes to populate (matches or random picks).`);
-      log(`User has ${selection.length} Figma frames selected for population.`);
+      log(`User has ${selection.length} Figma frames/instances selected for population.`);
       
       for (let i = 0; i < selection.length; i++) {
         const node = selection[i];
-        if (node.type === 'FRAME') {
+        if (node.type === 'FRAME' || node.type === 'INSTANCE') {
           const recipe = recipesToPopulate[i % recipesToPopulate.length];
-          log(`Populating selected frame ${i + 1}/${selection.length}: "${node.name}" with recipe title: "${recipe.Title || '(No Title)'}"`);
+          log(`Populating selected frame/instance ${i + 1}/${selection.length}: "${node.name}" with recipe title: "${recipe.Title || '(No Title)'}"`);
           await populateFrame(node, recipe);
         } else {
-          log(`Warning: Skipping selected node "${node.name}" (type: ${node.type}) as it is not a Frame. Only frames can be populated.`);
+          log(`Warning: Skipping selected node "${node.name}" (type: ${node.type}) as it is not a Frame or Instance. Only frames and instances can be populated.`);
         }
       }
       
-      const populatedCount = selection.filter(node => node.type === 'FRAME').length;
+      const populatedCount = selection.filter(node => node.type === 'FRAME' || node.type === 'INSTANCE').length;
       log(`Successfully populated ${populatedCount} recipe cards!`);
       log('Recipe population process complete!');
       log(`----- Plugin Execution End (Success) -----`);
